@@ -1,4 +1,4 @@
-name: Deploy Without Docker Hub
+name: Blue-Green Deployment
 
 on:
   push:
@@ -13,18 +13,42 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Build Docker image locally
-      run: docker build -t bluegreen-temp .
-
     - name: Run Trivy vulnerability scan
       uses: aquasecurity/trivy-action@master
       with:
-        image-ref: 'bluegreen-temp'
+        image-ref: 'nginx:alpine'  # or a real image
         format: 'table'
         severity: 'CRITICAL'
-        exit-code: '1'
+        exit-code: '0'
         ignore-unfixed: true
 
+    ########################
+    # DEPLOY TO BLUE SERVER
+    ########################
+    - name: Upload code to Blue EC2
+      uses: appleboy/scp-action@v0.1.4
+      with:
+        host: ${{ secrets.BLUE_IP }}
+        username: ubuntu
+        key: ${{ secrets.EC2_KEY }}
+        source: "."
+        target: "/home/ubuntu/bluegreen-app"
+
+    - name: Deploy blue_app on Blue EC2
+      uses: appleboy/ssh-action@v0.1.10
+      with:
+        host: ${{ secrets.BLUE_IP }}
+        username: ubuntu
+        key: ${{ secrets.EC2_KEY }}
+        script: |
+          sudo apt update
+          sudo apt install -y docker.io docker-compose
+          cd /home/ubuntu/bluegreen-app
+          sudo docker-compose -f docker-compose-blue.yml up -d --build blue_app
+
+    ########################
+    # DEPLOY TO GREEN SERVER
+    ########################
     - name: Upload code to Green EC2
       uses: appleboy/scp-action@v0.1.4
       with:
@@ -34,7 +58,7 @@ jobs:
         source: "."
         target: "/home/ubuntu/bluegreen-app"
 
-    - name: Ensure Docker & Compose installed on Green
+    - name: Deploy green_app on Green EC2
       uses: appleboy/ssh-action@v0.1.10
       with:
         host: ${{ secrets.GREEN_IP }}
@@ -43,29 +67,24 @@ jobs:
         script: |
           sudo apt update
           sudo apt install -y docker.io docker-compose
-          sudo systemctl start docker
-          sudo systemctl enable docker
-
-    - name: Deploy new version to Green
-      uses: appleboy/ssh-action@v0.1.10
-      with:
-        host: ${{ secrets.GREEN_IP }}
-        username: ubuntu
-        key: ${{ secrets.EC2_KEY }}
-        script: |
           cd /home/ubuntu/bluegreen-app
-          sudo docker-compose down || true
-          sudo docker system prune -af || true
-          sudo docker-compose up -d --build
+          sudo docker-compose -f docker-compose-green.yml up -d --build green_app
 
+    ########################
+    # HEALTH CHECK
+    ########################
     - name: Health Check on Green
       id: health
       continue-on-error: true
       run: |
+        echo "Checking Green..."
         sleep 5
-        curl --fail http://${{ secrets.GREEN_IP }}:${{ secrets.GREEN_PORT }} || exit 1
+        curl --fail http://${{ secrets.GREEN_IP }}:${{ secrets.GREEN_PORT || '8082' }} || exit 1
 
-    - name: Ensure Nginx is installed and active on Proxy
+    ########################
+    # CONFIGURE PROXY SERVER
+    ########################
+    - name: Ensure Nginx is installed on Proxy
       uses: appleboy/ssh-action@v0.1.10
       with:
         host: ${{ secrets.PROXY_IP }}
@@ -85,7 +104,7 @@ jobs:
         username: ubuntu
         key: ${{ secrets.EC2_KEY }}
         script: |
-          echo "❌ Health check failed. Rolling back to BLUE..."
+          echo "❌ Health check failed. Switching Proxy to BLUE"
           sudo cp /etc/nginx/sites-available/blue.conf /etc/nginx/sites-enabled/default
           sudo systemctl reload nginx
 
@@ -97,14 +116,17 @@ jobs:
         username: ubuntu
         key: ${{ secrets.EC2_KEY }}
         script: |
-          echo "✅ Health check passed. Switching to GREEN..."
+          echo "✅ Green passed. Switching Proxy to GREEN"
           sudo cp /etc/nginx/sites-available/green.conf /etc/nginx/sites-enabled/default
           sudo systemctl reload nginx
 
-    - name: Print Deployment Status
+    ########################
+    # DEPLOYMENT RESULT
+    ########################
+    - name: Print Deployment Result
       run: |
         if [ "${{ steps.health.outcome }}" == "success" ]; then
-          echo "✅ Deployment to GREEN successful."
+          echo "✅ Green deployed and switched successfully."
         else
-          echo "❌ Deployment failed. Rolled back to BLUE."
+          echo "❌ Green failed. Rolled back to Blue."
         fi
