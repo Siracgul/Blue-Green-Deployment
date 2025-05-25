@@ -1,0 +1,52 @@
+name: Blue-Green Deployment
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set image tag
+      id: vars
+      run: echo "tag=$(date +%s)" >> $GITHUB_OUTPUT
+
+    - name: Build and Push Docker Image
+      run: |
+        docker build -t ${{ secrets.DOCKER_USERNAME }}/bluegreen-app:${{ steps.vars.outputs.tag }} .
+        echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+        docker push ${{ secrets.DOCKER_USERNAME }}/bluegreen-app:${{ steps.vars.outputs.tag }}
+
+    - name: Deploy to Green Server via SSH
+      uses: appleboy/ssh-action@v0.1.10
+      with:
+        host: ${{ secrets.GREEN_IP }}
+        username: ubuntu
+        key: ${{ secrets.EC2_KEY }}
+        script: |
+          docker pull ${{ secrets.DOCKER_USERNAME }}/bluegreen-app:${{ steps.vars.outputs.tag }}
+          docker stop bluegreen-app || true
+          docker rm bluegreen-app || true
+          docker run -d --name bluegreen-app -p 8080:80 ${{ secrets.DOCKER_USERNAME }}/bluegreen-app:${{ steps.vars.outputs.tag }}
+
+    - name: Health Check on Green
+      run: |
+        sleep 5
+        curl --fail http://${{ secrets.GREEN_IP }}:8080 || exit 1
+
+    - name: (Optional) Switch Nginx to Green
+      if: success()
+      uses: appleboy/ssh-action@v0.1.10
+      with:
+        host: ${{ secrets.PROXY_IP }}
+        username: ubuntu
+        key: ${{ secrets.EC2_KEY }}
+        script: |
+          sudo sed -i 's/BLUE_IP/${{ secrets.GREEN_IP }}/g' /etc/nginx/nginx.conf
+          sudo systemctl reload nginx
