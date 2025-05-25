@@ -1,0 +1,12 @@
+version: '3'
+services:
+  blue_app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: blue_app
+    volumes:
+      - ./app/Blue:/usr/share/nginx/html
+    ports:
+      - "8081:80"
+    restart: always
