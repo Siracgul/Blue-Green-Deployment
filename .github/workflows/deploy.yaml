@@ -1,4 +1,4 @@
-name: Blue-Green Deployment
+name: Deploy Without Docker Hub
 
 on:
   push:
@@ -6,34 +6,32 @@ on:
       - main
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Set image tag
-      id: vars
-      run: echo "tag=$(date +%s)" >> $GITHUB_OUTPUT
+    - name: Upload files to Green EC2
+      uses: appleboy/scp-action@v0.1.4
+      with:
+        host: ${{ secrets.GREEN_IP }}
+        username: ubuntu
+        key: ${{ secrets.EC2_KEY }}
+        source: "."
+        target: "/home/ubuntu/bluegreen-app"
 
-    - name: Build and Push Docker Image
-      run: |
-        docker build -t ${{ secrets.DOCKER_USERNAME }}/bluegreen-app:${{ steps.vars.outputs.tag }} .
-        echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
-        docker push ${{ secrets.DOCKER_USERNAME }}/bluegreen-app:${{ steps.vars.outputs.tag }}
-
-    - name: Deploy to Green Server via SSH
+    - name: Deploy on Green EC2
       uses: appleboy/ssh-action@v0.1.10
       with:
         host: ${{ secrets.GREEN_IP }}
         username: ubuntu
         key: ${{ secrets.EC2_KEY }}
         script: |
-          docker pull ${{ secrets.DOCKER_USERNAME }}/bluegreen-app:${{ steps.vars.outputs.tag }}
-          docker stop bluegreen-app || true
-          docker rm bluegreen-app || true
-          docker run -d --name bluegreen-app -p 8080:80 ${{ secrets.DOCKER_USERNAME }}/bluegreen-app:${{ steps.vars.outputs.tag }}
+          cd /home/ubuntu/bluegreen-app
+          docker-compose down || true
+          docker-compose up -d --build
 
     - name: Health Check on Green
       run: |
