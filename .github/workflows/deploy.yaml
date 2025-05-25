@@ -13,10 +13,10 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Build Docker image for scanning
+    - name: Build Docker image locally
       run: docker build -t bluegreen-temp .
 
-    - name: Run Trivy vulnerability scan on Docker image
+    - name: Run Trivy vulnerability scan
       uses: aquasecurity/trivy-action@master
       with:
         image-ref: 'bluegreen-temp'
@@ -25,7 +25,7 @@ jobs:
         exit-code: '1'
         ignore-unfixed: true
 
-    - name: Upload files to Green EC2
+    - name: Upload code to Green EC2
       uses: appleboy/scp-action@v0.1.4
       with:
         host: ${{ secrets.GREEN_IP }}
@@ -34,7 +34,19 @@ jobs:
         source: "."
         target: "/home/ubuntu/bluegreen-app"
 
-    - name: Deploy on Green EC2
+    - name: Ensure Docker & Compose installed on Green
+      uses: appleboy/ssh-action@v0.1.10
+      with:
+        host: ${{ secrets.GREEN_IP }}
+        username: ubuntu
+        key: ${{ secrets.EC2_KEY }}
+        script: |
+          sudo apt update
+          sudo apt install -y docker.io docker-compose
+          sudo systemctl start docker
+          sudo systemctl enable docker
+
+    - name: Deploy new version to Green
       uses: appleboy/ssh-action@v0.1.10
       with:
         host: ${{ secrets.GREEN_IP }}
@@ -43,6 +55,7 @@ jobs:
         script: |
           cd /home/ubuntu/bluegreen-app
           sudo docker-compose down || true
+          sudo docker system prune -af || true
           sudo docker-compose up -d --build
 
     - name: Health Check on Green
@@ -50,9 +63,9 @@ jobs:
       continue-on-error: true
       run: |
         sleep 5
-        curl --fail http://${{ secrets.GREEN_IP }}:8080 || exit 1
+        curl --fail http://${{ secrets.GREEN_IP }}:${{ secrets.GREEN_PORT }} || exit 1
 
-    - name: Ensure Nginx is installed and running on Proxy
+    - name: Ensure Nginx is installed and active on Proxy
       uses: appleboy/ssh-action@v0.1.10
       with:
         host: ${{ secrets.PROXY_IP }}
@@ -64,7 +77,7 @@ jobs:
           sudo systemctl enable nginx
           sudo systemctl start nginx
 
-    - name: Rollback to Blue (on health check failure)
+    - name: Rollback to Blue if health check fails
       if: steps.health.outcome == 'failure'
       uses: appleboy/ssh-action@v0.1.10
       with:
@@ -72,11 +85,11 @@ jobs:
         username: ubuntu
         key: ${{ secrets.EC2_KEY }}
         script: |
-          echo "Rolling back to BLUE..."
-          sudo sed -i 's/${{ secrets.GREEN_IP }}/${{ secrets.BLUE_IP }}/g' /etc/nginx/nginx.conf
+          echo "❌ Health check failed. Rolling back to BLUE..."
+          sudo cp /etc/nginx/sites-available/blue.conf /etc/nginx/sites-enabled/default
           sudo systemctl reload nginx
 
-    - name: Switch Nginx to Green (only if health check passed)
+    - name: Switch traffic to Green if health check passes
       if: steps.health.outcome == 'success'
       uses: appleboy/ssh-action@v0.1.10
       with:
@@ -84,6 +97,14 @@ jobs:
         username: ubuntu
         key: ${{ secrets.EC2_KEY }}
         script: |
-          echo "Switching to GREEN..."
-          sudo sed -i 's/${{ secrets.BLUE_IP }}/${{ secrets.GREEN_IP }}/g' /etc/nginx/nginx.conf
+          echo "✅ Health check passed. Switching to GREEN..."
+          sudo cp /etc/nginx/sites-available/green.conf /etc/nginx/sites-enabled/default
           sudo systemctl reload nginx
+
+    - name: Print Deployment Status
+      run: |
+        if [ "${{ steps.health.outcome }}" == "success" ]; then
+          echo "✅ Deployment to GREEN successful."
+        else
+          echo "❌ Deployment failed. Rolled back to BLUE."
+        fi
