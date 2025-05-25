@@ -41,10 +41,8 @@ jobs:
         username: ubuntu
         key: ${{ secrets.EC2_KEY }}
         script: |
-          sudo apt update
-          sudo apt install -y docker.io docker-compose
           cd /home/ubuntu/bluegreen-app
-          sudo docker-compose -f docker-compose-blue.yml up -d --build blue_app
+          docker compose -f docker-compose-blue.yml up -d --build blue_app
 
     ########################
     # DEPLOY TO GREEN SERVER
@@ -65,10 +63,8 @@ jobs:
         username: ubuntu
         key: ${{ secrets.EC2_KEY }}
         script: |
-          sudo apt update
-          sudo apt install -y docker.io docker-compose
           cd /home/ubuntu/bluegreen-app
-          sudo docker-compose -f docker-compose-green.yml up -d --build green_app
+          docker compose -f docker-compose-green.yml up -d --build green_app
 
     ########################
     # HEALTH CHECK
