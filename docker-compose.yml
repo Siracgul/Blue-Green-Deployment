@@ -1,0 +1,7 @@
+version: '3'
+services:
+  web:
+    image: your-dockerhub-user/bluegreen-app:latest
+    ports:
+      - "8080:80"
+    restart: always
