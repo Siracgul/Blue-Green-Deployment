@@ -34,17 +34,32 @@ jobs:
           sudo docker-compose up -d --build
 
     - name: Health Check on Green
+      id: health
+      continue-on-error: true
       run: |
         sleep 5
         curl --fail http://${{ secrets.GREEN_IP }}:8080 || exit 1
 
-    - name: (Optional) Switch Nginx to Green
-      if: success()
+    - name: Rollback to Blue (on health check failure)
+      if: steps.health.outcome == 'failure'
       uses: appleboy/ssh-action@v0.1.10
       with:
         host: ${{ secrets.PROXY_IP }}
         username: ubuntu
         key: ${{ secrets.EC2_KEY }}
         script: |
-          sudo sed -i 's/BLUE_IP/${{ secrets.GREEN_IP }}/g' /etc/nginx/nginx.conf
+          echo "Rolling back to BLUE..."
+          sudo sed -i 's/${{ secrets.GREEN_IP }}/${{ secrets.BLUE_IP }}/g' /etc/nginx/nginx.conf
+          sudo systemctl reload nginx
+
+    - name: Switch Nginx to Green (only if health check passed)
+      if: steps.health.outcome == 'success'
+      uses: appleboy/ssh-action@v0.1.10
+      with:
+        host: ${{ secrets.PROXY_IP }}
+        username: ubuntu
+        key: ${{ secrets.EC2_KEY }}
+        script: |
+          echo "Switching to GREEN..."
+          sudo sed -i 's/${{ secrets.BLUE_IP }}/${{ secrets.GREEN_IP }}/g' /etc/nginx/nginx.conf
           sudo systemctl reload nginx
