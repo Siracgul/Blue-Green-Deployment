@@ -13,6 +13,15 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
+    - name: Run Trivy vulnerability scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'table'
+        exit-code: '1'
+        ignore-unfixed: true
+
     - name: Upload files to Green EC2
       uses: appleboy/scp-action@v0.1.4
       with:
