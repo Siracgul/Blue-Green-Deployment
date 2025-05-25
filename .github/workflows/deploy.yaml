@@ -52,6 +52,18 @@ jobs:
         sleep 5
         curl --fail http://${{ secrets.GREEN_IP }}:8080 || exit 1
 
+    - name: Ensure Nginx is installed and running on Proxy
+      uses: appleboy/ssh-action@v0.1.10
+      with:
+        host: ${{ secrets.PROXY_IP }}
+        username: ubuntu
+        key: ${{ secrets.EC2_KEY }}
+        script: |
+          sudo apt update
+          sudo apt install -y nginx
+          sudo systemctl enable nginx
+          sudo systemctl start nginx
+
     - name: Rollback to Blue (on health check failure)
       if: steps.health.outcome == 'failure'
       uses: appleboy/ssh-action@v0.1.10
