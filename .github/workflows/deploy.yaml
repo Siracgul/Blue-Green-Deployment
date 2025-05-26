@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch:
 
 jobs:
   deploy:
@@ -43,7 +42,7 @@ jobs:
         key: ${{ secrets.EC2_KEY }}
         script: |
           cd /home/ubuntu/bluegreen-app
-          sudo docker compose -f docker-compose-blue.yml up -d --build blue_app
+          docker compose -f docker-compose-blue.yml up -d --build blue_app
 
     ########################
     # DEPLOY TO GREEN SERVER
@@ -65,7 +64,7 @@ jobs:
         key: ${{ secrets.EC2_KEY }}
         script: |
           cd /home/ubuntu/bluegreen-app
-          sudo docker compose -f docker-compose-green.yml up -d --build green_app
+          docker compose -f docker-compose-green.yml up -d --build green_app
 
     ########################
     # HEALTH CHECK
