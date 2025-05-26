@@ -43,7 +43,6 @@ jobs:
         script: |
           cd /home/ubuntu/bluegreen-app
           sudo docker compose -f docker-compose-blue.yml up -d --build blue_app
-
     ########################
     # DEPLOY TO GREEN SERVER
     ########################
@@ -65,7 +64,6 @@ jobs:
         script: |
           cd /home/ubuntu/bluegreen-app
           sudo docker compose -f docker-compose-green.yml up -d --build green_app
-
     ########################
     # HEALTH CHECK
     ########################
@@ -76,7 +74,6 @@ jobs:
         echo "Checking Green..."
         sleep 5
         curl --fail http://${{ secrets.GREEN_IP }}:${{ secrets.GREEN_PORT || '8082' }} || exit 1
-
     ########################
     # CONFIGURE PROXY SERVER
     ########################
@@ -91,7 +88,6 @@ jobs:
           sudo apt install -y nginx
           sudo systemctl enable nginx
           sudo systemctl start nginx
-
     - name: Rollback to Blue if health check fails
       if: steps.health.outcome == 'failure'
       uses: appleboy/ssh-action@v0.1.10
@@ -103,7 +99,6 @@ jobs:
           echo "❌ Health check failed. Switching Proxy to BLUE"
           sudo cp /etc/nginx/sites-available/blue.conf /etc/nginx/sites-enabled/default
           sudo systemctl reload nginx
-
     - name: Switch traffic to Green if health check passes
       if: steps.health.outcome == 'success'
       uses: appleboy/ssh-action@v0.1.10
@@ -115,7 +110,6 @@ jobs:
           echo "✅ Green passed. Switching Proxy to GREEN"
           sudo cp /etc/nginx/sites-available/green.conf /etc/nginx/sites-enabled/default
           sudo systemctl reload nginx
-
     ########################
     # DEPLOYMENT RESULT
     ########################
